@@ -7,18 +7,32 @@ fn main() {
     let (w, h) = (512, 512);
     let pixels = (0..w * h).into_par_iter().map(|i| {
         let (y, x) = (i / h, i % h);
-        let (y, x) = (y as f32 / h as f32, x as f32 / w as f32);
+        let (y, x) = (y as f64 / h as f64, x as f64 / w as f64);
         let (y, x) = ((y - 0.5) * 4., (x - 0.5) * 4.);
 
-        let mut a = 0.0;
-        let mut b = 0.0;
-        for _ in 0..100 {
-            // (a+bi)(a+bi)
-            // a^2 - b^2 + 2abi
-            (a, b) = (a*a - b*b + x, 2.*a*b + y);
-            if (a.abs() + b.abs()) > 2. {
-                return (255, 255, 255);
-            }
+        let mut a: f64 = x;
+        let mut b: f64 = y;
+        for _ in 0..30 {
+            // z^2 + c
+            // (a, b) = (a*a - b*b, 2.*a*b);
+
+            // z^i + c = e^(i ln z) + c
+
+            let mut distance = (a*a + b*b).sqrt().ln();
+            let mut angle = b.atan2(a);
+            // (distance, angle) = (distance * -4., angle * -4.);
+            (distance, angle) = (distance * -4., angle * 4.);
+            (distance, angle) = (-angle, distance);
+            let distance_back = distance.exp();
+            let (a_base, b_base) = (angle.cos(), angle.sin());
+            (a, b) = (distance_back * a_base, distance_back * b_base);
+
+
+            (a, b) = (a + x, b + y);
+        }
+
+        if (a*a + b*b) > 4. {
+            return (255, 255, 255);
         }
 
         (5, 5, 5)

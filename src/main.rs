@@ -6,31 +6,40 @@ use rand::Rng;
 use rayon::prelude::*;
 
 
-const N_ITERATIONS: [usize; 3] = [50, 25, 100];
+const N_ITERATIONS: [usize; 3] = [500, 250, 1000];
 const fn cmax(a: usize, b: usize) -> usize {
     [a, b][(a < b) as usize]
 }
 const MAX_ITERATIONS: usize = cmax(cmax(N_ITERATIONS[0], N_ITERATIONS[1]), N_ITERATIONS[2]);
-const ITERATE_ON_EACH_PIXEL: usize = 64;
-const THRESHOLDS: [f32; 3] = [4.0, 3.0, 2.5];
-const RESOLUTION: usize = 512;
-const ASPECT_RATIO: f64 = 2.0;
-const SCALING_FACTOR: f64 = 1.0;
+const ITERATE_ON_EACH_PIXEL: usize = 256;
+// Appears to need to scale with N_ITERATIONS, too
+const THRESHOLDS: [f32; 3] = [0.04, 0.03, 0.025];
+const RESOLUTION: usize = 1024;
+const ASPECT_RATIO: f64 = 3.0;
+const SCALING_FACTOR: f64 = 0.8;
 const OFFSET_X: f64 = 0.0;
 const OFFSET_Y: f64 = 0.5;
-const MODULATION: f64 = 2.25;
+const MAX_SAMPLE: f64 = 1.25;
+const MODULATION: f64 = 2.75;
 const ROTATION: f64 = -std::f64::consts::FRAC_PI_2;
+// sample only from where you can see?
+const SOLIPSISM_MODE: bool = false;
+const COLORFUL_MODE: bool = false;
 
 fn main() {
     let (w, h) = ((RESOLUTION as f64 * ASPECT_RATIO).round() as usize, RESOLUTION);
     // how is this not mut 🥲
-    // let atomic_pixels: [Vec<AtomicU32>; 3] = [(0..w * h).map(|_| AtomicU32::new(0)).collect(); 3];
     let atomic_pixels: [Vec<AtomicU32>; 3] = core::array::from_fn(|_| (0..w * h).map(|_| AtomicU32::new(0)).collect());
-    (0..w*h*ITERATE_ON_EACH_PIXEL).into_par_iter().for_each(|i| {
+    (0..w*h*ITERATE_ON_EACH_PIXEL).into_par_iter().for_each(|_| {
         let mut rng = rand::thread_rng();
         let (y, x): (f64, f64) = (rng.gen(), rng.gen());
         let mut visited = Vec::<(usize, usize)>::with_capacity(MAX_ITERATIONS);
-        let (x, y) = ((x + OFFSET_X - 0.5) / SCALING_FACTOR * ASPECT_RATIO, (y - OFFSET_Y - 0.5) / SCALING_FACTOR);
+        let mut escaped = Vec::<bool>::with_capacity(MAX_ITERATIONS);
+        let (x, y) = if SOLIPSISM_MODE {
+            ((x + OFFSET_X - 0.5) / SCALING_FACTOR * ASPECT_RATIO, (y - OFFSET_Y - 0.5) / SCALING_FACTOR)
+        } else {
+            ((x - 0.5) * 2. * MAX_SAMPLE, (y - 0.5) * 2. * MAX_SAMPLE)
+        };
 
         let mut a: f64 = x;
         let mut b: f64 = y;
@@ -62,15 +71,24 @@ fn main() {
                 let p = p.clamp(0, w * h - 1);
                 visited.push((i, p));
             }
+            escaped.push((a*a + b*b) > 4.);
         }
 
-        if (a*a + b*b) > 4. {
-            for (i, v) in visited {
-                for k in 0..3 {
-                    if i < N_ITERATIONS[k] {
-                        atomic_pixels[k][v].fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    }
+        for k in 0..3 {
+            if COLORFUL_MODE {
+                if !escaped[N_ITERATIONS[k] - 1] {
+                    continue;
                 }
+            } else {
+                if !escaped[MAX_ITERATIONS - 1] {
+                    continue;
+                }
+            }
+            for &(i, v) in &visited {
+                if !COLORFUL_MODE && i >= N_ITERATIONS[k] {
+                    break;
+                }
+                atomic_pixels[k][v].fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             }
         }
     });
@@ -84,7 +102,7 @@ fn main() {
         ]).collect::<Vec<_>>();
     let max_pixels = THRESHOLDS
         .iter()
-        .map(|&t| ITERATE_ON_EACH_PIXEL as f32 * t)
+        .map(|&t| ITERATE_ON_EACH_PIXEL as f32 * MAX_ITERATIONS as f32 * t)
         .collect::<Vec<_>>();
     let pixels: Vec<[u8; 3]> = pixels.iter().map(|&rgb| {
         let rgb = rgb.iter().zip(max_pixels.iter()).map(
